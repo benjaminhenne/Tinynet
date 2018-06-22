@@ -1,0 +1,42 @@
+#!/bin/bash
+#$ -N tinynet						 		                                              # name of the job
+#$ -wd /net/store/ni/projects/l1activations/networks/tinynet/src/         # working directory
+#$ -cwd									                                                  # change to working directory (not sure if strictly needed)
+#$ -l mem=2G								                                              # list of requirements
+#$ -l mem_free=2G							                                            # ...
+#$ -l nv_mem_free=2G
+#$ -l ubuntu_version=xenial
+#$ -l cuda=1
+#$ -l cuda_capability=500
+#$ -l cuda_driver=8000.000000
+#$ -l cuda_cores=3000
+#$ -p 0 ## priority, only negative integers allowed			                  # priority of job (users can only decrease, admins can increase)
+#$ -j y									                                                  # merge standard error and standard output stream
+#$ -o /net/store/ni/projects/l1activations/networks/tinynet/out_files/		# output file directory
+#$ -cwd
+#$ -m e									                                                  # confirm end of job via mail
+
+# write header for return files
+echo "*** Start of job ***"
+date
+echo ""
+echo "Hostname"
+echo "$HOSTNAME"
+echo ""
+echo "Start"
+echo "============"
+
+source /net/store/ni/projects/l1activations/venv3/bin/activate
+
+export CUDNN_HOME=/net/store/ni/projects/l1activations/dependencies/cuda/
+export DYLD_LIBRARY_PATH="$DYLD_LIBRARY_PATH:$CUDNN_HOME/lib64"
+export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$CUDNN_HOME/lib64"
+
+python /net/store/ni/projects/l1activations/networks/tinynet/src/main.py $JOB_ID
+deactivate
+
+# write footer for return files
+echo ""
+echo "============"
+date
+echo "*** End of job ***"
