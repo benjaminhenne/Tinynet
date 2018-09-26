@@ -1,21 +1,22 @@
 import tensorflow as tf
-from activation_functions import *
+from activation_functions import identity_activation, swish
 
 class CIFAR10_NET(object):
     """
 
     """
 
-    def __init__(self, Settings):
+    def __init__(self, Settings, features, labels, hparams):
         """
 
         """
         self.settings = Settings
+        self.hparams = hparams
 
         #Variables
-        self.X = tf.placeholder(tf.float32, shape=[None, 32, 32, 3], name="y")
-        self.y = tf.placeholder(tf.int64, shape=[None], name="y")
-        self.learning_rate = tf.placeholder(tf.float32, name="learning_rate")
+        self.X = features
+        self.y = labels
+        self.learning_rate = hparams.learning_rate
         self.global_step = tf.Variable(0, trainable=False, name="global_step")
 
         #NETWORK
@@ -48,7 +49,6 @@ class CIFAR10_NET(object):
                 self.l2 = [tf.nn.l2_loss(v) for f in tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES) if 'weight' and not 'act_weight' in v.name]
                 self.weights_norm = tf.reduce_sum(input_tensor=self.settings.l2_lambda*tf.stack(self.l2), name='weights_norm')
                 self.loss = self.xentropy + self.weights_norm
-
             else:
                 self.loss = self.xentropy
 
@@ -70,7 +70,7 @@ class CIFAR10_NET(object):
             self.minimize = self.optimizer.minimize(self.loss)
             varlist = [v for v in tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES)]
             self.gradients = self.optimizer.compute_gradients(self.loss, var_list=varlist)
-            self.update = self.optimizer.apply_gradients(grads_and_vars=self.gradients, global_step=self.global_step)
+            self.update = self.optimizer.apply_gradients(grads_and_vars=self.gradients, global_step=tf.train.get_global_step())
 
         #summaries
         self.summaries = tf.summary.merge_all()
@@ -98,7 +98,7 @@ class CIFAR10_NET(object):
             state = tf.nn.dropout(state, keep_prob=0.5, name=namescope+'/dropout5')
             state = self.dense_multi_act_layer(layer_input=state, W_shape=[192], AF_set=self.settings.af_set, af_weights_init=self.settings.af_inits, varscope=namescope+'/dense6')
             # output layer
-            logits = self.dense_multi_act_layer(layer_input=state, W_shape=[10], AF_set=None, af_weights_init=None, varscope=namescope+'/denseout')
+            logits = self.dense_multi_act_layer(layer_input=state, W_shape=[self.hparams.logit_dims], AF_set=None, af_weights_init=None, varscope=namescope+'/denseout')
             return logits, ["conv1", "conv2", "conv3", "conv4", "dense5", "dense6"]
 
     def build_ianntf_network(self, namescope=None):
@@ -116,7 +116,7 @@ class CIFAR10_NET(object):
 
             state = self.dense_multi_act_layer(layer_input=state, W_shape=[512], AF_set=self.settings.af_set, af_weights_init=self.settings.af_inits, varscope='dense3')
 
-            logits = self.dense_multi_act_layer(layer_input=state, W_shape=[10], AF_set=None, af_weights_init=None, varscope='denseout')
+            logits = self.dense_multi_act_layer(layer_input=state, W_shape=[self.hparams.logit_dims], AF_set=None, af_weights_init=None, varscope='denseout')
             return logits, ["conv1", "conv2", "dense3"]
 
 
@@ -138,7 +138,7 @@ class CIFAR10_NET(object):
             beta = tf.get_variable('act_bias/swish', initializer = 0.1)
             state = swish(state, beta)
 
-            logits = self.dense_multi_act_layer(layer_input=state, W_shape=[10], AF_set=None, af_weights_init=None, varscope=namescope+'/denseout')
+            logits = self.dense_multi_act_layer(layer_input=state, W_shape=[self.hparams.logit_dims], AF_set=None, af_weights_init=None, varscope=namescope+'/denseout')
             return logits, ["conv1", "conv2", "dense3"]
 
 

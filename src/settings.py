@@ -1,18 +1,10 @@
-import CIFAR as CIFAR
 from activation_functions import *
 
 class Settings:
 
     def __init__(self):
-        #training
-        self.epochs = 500
-        self.minibatch_size = 256
-        self.logit_dim = 10
         self.l1_regularize = True
-        self.l1_regularizer_scale = 0.8
-        self.dataset_path = '/gpfs/homea/hos00/hos002/datasets/cifar-10/'
-	#self.dataset_path = '/net/store/ni/projects/l1activations/datasets/cifar-10/'
-        self.data_loader = CIFAR.CIFAR(self.dataset_path)
+        self.l1_regularizer_scale = 0.05
 
         self.af_inits = {'swish'    : lambda fan_in: 0.1, #swish
                          'relu'     : lambda fan_in: 2.0/fan_in[2] if len(fan_in) == 4 else 2.0/fan_in[1],  #relu

@@ -1,108 +1,215 @@
+import argparse
+import os
+
 import tensorflow as tf
-import numpy as np
-import settings as Settings
-import CIFAR10_NET as net
-import sys
-import os, time
 
+from settings import Settings
+from DataHandler import DataHandler
+from util import str2bool
+import tinynet_architecture as net
 
+def get_model_fn():
+    """Creates a model function that builds the net and manages estimator specs."""
 
-def train(run):
+    def _small_net_model_fn(features, labels, mode, params):
+        """Builds the network model and prepares EstimatorSpecs for prediction, training and evaluation."""
+        
+        # individual model set-up
+        settings = Settings()
+        network = net.CIFAR10_NET(settings, features, labels, params)
+        logits = network.logits
 
+        # prediction EstimatorSpec
+        predicted_classes = tf.argmax(logits, 1)
+        if mode == tf.estimator.ModeKeys.PREDICT:
+            predictions = {
+                'class': predicted_classes,
+                'prob': tf.nn.softmax(logits)
+            }
+            return tf.estimator.EstimatorSpec(mode, predictions=predictions)
 
-    settings = Settings.Settings()
-    print("########################")
-    print("#     Build Network    #")
-    print("########################")
-    generator = settings.data_loader;
-    summary_writer = tf.summary.FileWriter("./summaries/" + str(run))
-    network = net.CIFAR10_NET(settings)
+        # training EstimatorSpec
+        if mode == tf.estimator.ModeKeys.TRAIN:
+            return tf.estimator.EstimatorSpec(mode, loss=network.loss, train_op=network.update)
 
-    print("########################")
-    print("#       Training       #")
-    print("########################")
-    with tf.Session() as session:
-        saver = tf.train.Saver()
+        # evaluation EstimatorSpec
+        eval_metric_ops = {
+            'accuracy': tf.metrics.accuracy(
+                labels=labels, predictions=predicted_classes)
+        }
+        return tf.estimator.EstimatorSpec(mode, loss=network.loss, eval_metric_ops=eval_metric_ops)
 
-        #check if run already exits: if so continue run
-        #if os.path.isdir("stored_weights/"+str(run)):
-        #    print("[Info] Stored weights for run detected.")
-        #    print("[Info] Loading weights...")
-        #    saver.restore(session, tf.train.latest_checkpoint('./stored_weights/'+str(run)))
-        #else
-        summary_writer.add_graph(session.graph)
-        session.run(tf.global_variables_initializer())
+    return _small_net_model_fn
 
-        #Initialize the global_step tensor
-        tf.train.global_step(session, network.global_step)
-        print(" Epoch | Val Acc | Avg Tr Acc | Avg. Loss | Avg. CrossEntropy | Avg. L1 Penalty | Time")
-        print("-------+---------+------------+-----------+-------------------+-----------------+------------")
-        for epoch in range(settings.epochs):
-            t = time.time()
+def get_input_fn(mode=None, params=None):
+    """Creates an input function that loads the dataset and prepares it for use."""
 
-
-            ## Training
-            losses = []
-            penalties = []
-            cross_entropies = []
-            accuracies = []
-            for train_X, train_y in generator.get_training_batch(settings.minibatch_size):
-                _global_step, _xentropy, _penalty, _logits, _summaries, _, _loss, _accuracy = session.run([network.global_step, network.xentropy, network.penalty, network.logits, network.summaries, network.update, network.loss, network.accuracy], feed_dict={network.X:train_X, network.y:train_y, network.learning_rate: 1e-3})
-
-                losses.append(_loss)
-                penalties.append(_penalty)
-                cross_entropies.append(_xentropy)
-                accuracies.append(_accuracy)
-                #write summaries
-                summary_writer.add_summary(_summaries, tf.train.global_step(session, network.global_step))
-
-            ## Validation
-            val_X, val_y = next(generator.get_validation_batch(0))
-            val_acc, val_loss = session.run([network.accuracy, network.loss], feed_dict={network.X:val_X,network.y:val_y, network.learning_rate: 0.001})
-
-            # Save model
-            #saver.save(session, "./stored_weights/"+str(run)+"/stored", _global_step)
-
-            #Printing Information
-            t = time.time() - t
-            minutes, seconds = divmod(t, 60)
-            avg_loss = np.average(losses)
-            avg_penalty = np.average(penalties)
-            avg_cross_entropy = np.average(cross_entropies)
-            avg_tr_acc = np.average(accuracies)
-            #print(" Epoch | Val Acc | Avg TrAcc | Avg. CrossEntropy | Avg. L1 Penalty")
-            print(" #{0:3d}  | {1:^7.3f} | {2:^10.3f} | {3:^9.3f} | {4:^17.3f} | {5:^15.3f} | {6:^3.0f}m {7:^4.2f}s".format(
-                epoch + 1, val_acc, avg_tr_acc, avg_loss, avg_cross_entropy, avg_penalty, minutes, seconds))
-            print("-------+---------+------------+-----------+-------------------+-----------------+------------")
-
-
-def main(argv):
-
-    #simple_net = SIMPLE_NET()
-    if len(argv) == 0:
-        raise Exception("Please provide a run (Number)")
-    run = argv[0]
-    if os.path.isdir("summaries/"+run):
-        print('[Attention] The specified run already exists!')
-        print('[Attention] Load weights and continue training? [y/n]')
-
-
-        not_answered = True
-        while not_answered:
-            response = input().lower()
-            if response == "y":
-                not_answered = False
-            elif response =="n":
-                print("[Exit] Please specify a new run")
-                sys.exit()
+    def _input_fn(mode=None, params=None):
+        """Loads the dataset, decodes, reshapes and preprocesses it for use. Computations performed on CPU."""
+        with tf.device('/cpu:0'):
+            if mode == 'train':
+                dataset = DataHandler(mode, "train", params).prepare_for_train()
+            elif mode == 'eval':
+                dataset = DataHandler(mode, "validation", params).prepare_for_eval(params.eval_batch_size)
+            elif mode == 'test':
+                dataset = DataHandler(mode, "test", params).prepare_for_eval(params.eval_batch_size)
             else:
-                print("[Fail] Please respond with [y/n]")
+                raise ValueError('_input_fn received invalid MODE')
+            return dataset.make_one_shot_iterator().get_next()
 
-        if not os.path.isdir("stored_weights/"+str(run)):
-            print('[Fatal] No stored weights for run '+str(run)+' found!!')
-            sys.exit()
+    return _input_fn
 
-    train(run)
+def build_estimator(run_config, hparams):
+    """Builds the estimator object and returns it."""
+    return tf.estimator.Estimator(model_fn=get_model_fn(),
+           config=run_config,
+           params=hparams)
 
-if __name__ == "__main__":
-   main(sys.argv[1:])
+def main(**hparams):
+
+    # Start tensorflow logging
+    tf.logging.set_verbosity(tf.logging.INFO)
+
+    tf.logging.info('Using arguments: {}\n'.format(str(hparams)))
+
+    session_config = tf.ConfigProto(
+        allow_soft_placement=True,
+        log_device_placement=False,
+        device_count={"CPU": hparams['num_cores'], "GPU": hparams['num_gpus']},
+        gpu_options=tf.GPUOptions(force_gpu_compatible=True)
+    )
+
+    # for-loop for batch jobs
+    for i in range(hparams['repeats']):
+        tf.logging.info('Commencing iteration {} of {}.'.format((i+1), hparams['repeats']))
+
+        config = tf.estimator.RunConfig(
+            model_dir=os.path.join(hparams['output_dir'], '{}-{}'.format(str(hparams['job_id']), str(i+1))),
+            tf_random_seed=None,
+            save_summary_steps=100,
+            save_checkpoints_steps=1000,
+            save_checkpoints_secs=None,
+            session_config=session_config,
+            keep_checkpoint_max=int(hparams['train_steps']/1000)+1,
+            keep_checkpoint_every_n_hours=10000,
+            log_step_count_steps=100
+            #train_distribute=None
+        )
+
+        classifier = build_estimator(
+            run_config=config,
+            hparams=tf.contrib.training.HParams(**hparams)
+        )
+
+        # start training and evaluation loop with estimator
+        tf.estimator.train_and_evaluate(
+            classifier,
+            tf.estimator.TrainSpec(input_fn=get_input_fn(mode=tf.estimator.ModeKeys.TRAIN), max_steps=hparams['train_steps']),
+            tf.estimator.EvalSpec(input_fn=get_input_fn(mode=tf.estimator.ModeKeys.EVAL), throttle_secs=1, steps=None)
+        )
+
+        # compute final test performance
+        if hparams['perform_test']:
+            classifier.evaluate(input_fn=get_input_fn(mode='test'), name='test')
+
+        tf.logging.info('Finished iteration {} of {}.\n'.format((i+1), hparams['repeats']))
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        '-i', '--data-dir',
+        type=str,
+        required=True,
+        help='The directory where the input data is stored.',
+        dest='data_dir')
+    parser.add_argument(
+        '-o', '--output-dir',
+        type=str,
+        required=True,
+        help='The directory where the output will be stored.',
+        dest='output_dir')
+    parser.add_argument(
+        '-j', '--job-id',
+        type=int,
+        required=True,
+        help='The id this job was assigned during submission, alternatively any unique number distinguish runs.',
+        dest='job_id')
+    parser.add_argument(
+        '-a', '--array-job',
+        type=int,
+        default=1,
+        help='Number of scheduled repeats this job should run for.',
+        dest='repeats')
+    parser.add_argument(
+        '-d', '--logit-dimensions',
+        type=int,
+        required=True,
+        help='Dimension of network logits',
+        dest='logit_dims')
+    parser.add_argument(
+        '-n', '--num-gpus',
+        type=int,
+        default=1,
+        help='The number of gpus used. Uses only CPU if set to 0.',
+        dest='num_gpus')
+    parser.add_argument(
+        '-c', '--num-cpu-cores',
+        type=int,
+        default=1,
+        help='The number of cpu cores available for data preparation.',
+        dest='num_cores')
+    parser.add_argument(
+        '-s', '--train-steps',
+        type=int,
+        default=100,
+        help='The number of steps to use for training.',
+        dest='train_steps')
+    parser.add_argument(
+        '-b', '--batch-size',
+        type=int,
+        default=128,
+        help='Batch size.',
+        dest='batch_size')
+    parser.add_argument(
+        '-e', '--eval-batch-size',
+        type=int,
+        default=-1,
+        help="Evaluation batch size. Defaults to -1, will then use dataset's full evaluation set in one batch",
+        dest="eval_batch_size")
+    parser.add_argument(
+        '-l', '--learning-rate',
+        type=float,
+        default=5e-4,
+        help="""\
+        This is the inital learning rate value. The learning rate will decrease
+        during training. For more details check the model_fn implementation in
+        this file.""",
+        dest='learning_rate')
+    parser.add_argument(
+        '-t', '--perform-test',
+        type=str2bool,
+        default=False,
+        help="Whether or not to evaluate test performance after max_steps is reached",
+        dest='perform_test')
+    parser.add_argument(
+        '-g', '--summarise-gradients',
+        type=str2bool,
+        default=False,
+        help="Whether or not to summarise layer weight gradients.",
+        dest='sum_grads')
+    parser.add_argument(
+        '-p', '--preprocess-data',
+        type=str2bool,
+        default=False,
+        help='Whether or not the input data for training should be preprocessed',
+        dest='preprocess_data')
+    parser.add_argument(
+        '-z', '--preprocess-zoom-factor',
+        type=float,
+        default=1.20,
+        help='Zoom factor for pad and crop performed during preprocessing.',
+        dest='preprocess_zoom'
+    )
+    args = parser.parse_args()
+
+    main(**vars(args))
