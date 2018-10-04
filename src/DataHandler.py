@@ -48,9 +48,9 @@ def get_parse_fn(mode, params):
             # find target shape next, resize into that with cropping or 0-padding
             height, width, depth = info['hwd']
             # resizes image to size that fits in `size` to preserve aspect ratio
-            image = tf.image.resize_images(image, [height, width, depth], preserve_aspect_ratio=True)
+            image = tf.image.resize_images(image, [height, width], preserve_aspect_ratio=True)
             # resize again without preservation to get uniform image size with minimal distortion
-            image = tf.image.resize_images(image, [height, width, depth], preserve_aspect_ratio=False)
+            image = tf.image.resize_images(image, [height, width], preserve_aspect_ratio=False)
         else:
             # no preprocessing necessary, set to static image size
             height, width, depth = info['hwd']
