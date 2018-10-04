@@ -15,11 +15,14 @@ def get_parse_fn(mode, params):
 
         """
         Reads dataset information from pickle file. Contents:
-            'encoded':  True if dataset has been encoded, false if tf.decode_raw() is fine
-            'data':     Name of image data feature in format dict
-            'labels':   Name of label data feature in format dict
-            'hwd':      Array containing heigth, width and depth of encoded image data
-            'format':   Dictionary containing format of dataset to decode
+            'encoded':              True if dataset has been encoded, false if tf.decode_raw() is fine
+            'data':                 Name of image data feature in format dict
+            'labels':               Name of label data feature in format dict
+            'resize_before_use':    True if images need to be resized/normalised before use
+            'hwd':                  Array containing height, width and depth of encoded image data
+            'eval_batch_size':      Batch size used for evaluation, either whole dataset or large batches
+            'file_pattern':         Dictionary containing the file patterns for tfrecord files ('train', 'validation', 'test')
+            'format':               Dictionary containing format of dataset to decode
         """
         with open(os.path.join(params.data_dir, 'content.pickle'), 'rb') as handle:
             info = pickle.load(handle)
@@ -34,12 +37,21 @@ def get_parse_fn(mode, params):
             image = tf.cast(tf.decode_raw(parsed[info['data']], tf.uint8), tf.float32)
 
         # reshape data into desired shape
-        height, width, depth = info['hwd']
-        image.set_shape([height * width * depth])
-
         if info['resize_before_use']:
+            # used when dataset has varying image sizes
+            # first, grab actual image size from parsed Example content
+            height = parsed['image/height']
+            width  = parsed['image/width']
+            depth  = parsed['image/channels']
+            # set image to actual shape first
+            image = tf.reshape(image, tf.stack([height, width, depth]))
+            # find target shape next, resize into that with cropping or 0-padding
+            height, width, depth = info['hwd']
             image = tf.image.resize_image_with_crop_or_pad(image, height, width)
         else:
+            # no preprocessing necessary, set to static image size
+            height, width, depth = info['hwd']
+            image.set_shape([height * width * depth])
             image = tf.reshape(image, [height, width, depth])
         label = parsed[info['labels']]
 
