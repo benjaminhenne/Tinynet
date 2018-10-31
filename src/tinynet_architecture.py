@@ -12,7 +12,7 @@ class CIFAR10_NET(object):
         """
         self.settings = Settings
         self.hparams = hparams
-
+        print(features)
         #Variables
         self.X = features
         self.y = labels
